@@ -180,7 +180,7 @@ local function SetupMove(bot, mv)
             -- Back off for a bit after 2 seconds, mostly for cases where there is an automatic door in front that can't be opened
             if state.stuckTime > 2 then
                 if state.stuckBackTime < curTime then
-                    state.stuckBackTime = curTime + math.Rand(1, 2)
+                    state.stuckBackTime = curTime + math.Rand(2, 3)
                 end
             end
 
@@ -339,20 +339,20 @@ local function UpdateTargets()
                 if not ply:Alive() then continue end
                 if ply == bot then continue end
 
-                -- Role-based hostility: 1 = Human, 2 = Brood, 3 = Swarm
+                -- 1 = Human, 2 = Brood, 3 = Swarm
                 local plyRole = ply.GetRole and ply:GetRole() or 1
                 local isHostile = false
 
-                if botRole == 1 then -- Human hostile to Brood (if active) and Swarm
-                    if plyRole == 2 then -- Brood
+                if botRole == 1 then
+                    if plyRole == 2 then
                         local activeWeapon = ply:GetActiveWeapon()
                         if IsValid(activeWeapon) and activeWeapon:GetClass() == "weapon_mor_brood" then
                             isHostile = true
                         end
-                    elseif plyRole == 3 then -- Swarm
+                    elseif plyRole == 3 then
                         isHostile = true
                     end
-                elseif (botRole == 2 or botRole == 3) and plyRole == 1 then -- Alien hostile to Humans
+                elseif (botRole == 2 or botRole == 3) and plyRole == 1 then
                     isHostile = true
                 end
 
