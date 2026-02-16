@@ -105,6 +105,8 @@ end
 local propTrace = {mask = MASK_SHOT}
 
 function MBot.IsTargetVisible(bot, target)
+    if not bot.BotStates then return nil end
+
     if not target:IsPlayer() then
         local propCenter = target:WorldSpaceCenter()
 
@@ -121,8 +123,10 @@ function MBot.IsTargetVisible(bot, target)
 
     local targetEyePos = target:EyePos()
 
-    if not MBot.IsPosWithinFOV(bot, targetEyePos) then
-        return nil
+    if bot.BotStates.whatRole ~= 2 then
+        if not MBot.IsPosWithinFOV(bot, targetEyePos) then
+            return nil
+        end
     end
 
     if bot:VisibleVec(targetEyePos) then

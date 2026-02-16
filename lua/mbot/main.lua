@@ -2,6 +2,9 @@
     Hook Functions
 ----------------------------------------]]--
 
+local weaponCache = {}
+local weaponCachePosLookup = {}
+
 local function PlayerSpawn(bot)
     bot.BotStates = table.Copy(MBot.DefaultBotStates)
     bot.BotStates.goalPos = bot:GetPos()
@@ -13,11 +16,23 @@ end
 
 -- This hook runs first before SetupMove
 local function StartCommand(bot, ucmd)
-    if not IsValid(bot.Pathfinding) then return end
+    if not IsValid(bot.Pathfinding) then
+        bot.BotStates = table.Copy(MBot.DefaultBotStates)
+        bot.BotStates.goalPos = bot:GetPos()
+        bot.Pathfinding = Path("Follow")
+        bot.Pathfinding:SetGoalTolerance(20)
+        bot.Pathfinding:SetMinLookAheadDistance(300)
+        bot.Pathfinding:Compute(bot, bot.BotStates.goalPos, function(area, fromArea, ladder, elevator, length) return MBot.PathGenerator(false, area, fromArea, ladder, elevator, length) end)
+    end
 
     local state = bot.BotStates
     local curTime = CurTime()
     local isTargetValid = false
+
+
+    --[[----------------------------------------
+        Update Bot States
+    ----------------------------------------]]--
 
     -- Set target if pending
     if state.pendingTarget then
@@ -49,6 +64,23 @@ local function StartCommand(bot, ucmd)
         state.whatRole = bot:GetRole()
     end
 
+    -- Update weapon info
+    state.curWeapon = bot:GetActiveWeapon()
+    if IsValid(state.curWeapon) then
+        state.curWeaponClass = state.curWeapon:GetClass()
+        state.isMelee = MBot.Database.WEAPON_MELEE[state.curWeaponClass] ~= nil
+    else
+        state.curWeaponClass = ""
+        state.isMelee = false
+    end
+
+    -- Update movement info
+    state.isCrouching = bot:Crouching()
+    state.isOnGround = bot:IsOnGround()
+
+    -- Update bot position
+    state.botPos = bot:GetPos()
+
     -- Check if on ladder
     state.onLadder = bot:GetMoveType() == MOVETYPE_LADDER
     if state.prevOnLadder ~= state.onLadder then
@@ -61,9 +93,12 @@ local function StartCommand(bot, ucmd)
         end
     end
 
+
+    --[[----------------------------------------
+        Bot Actions/Buttons
+    ----------------------------------------]]--
+
     local buttons = 0
-    local curWeapon = bot:GetActiveWeapon()
-    local curWeaponValid = IsValid(curWeapon)
     local targetVisible = isTargetValid and state.targetVisiblePos
 
     -- Jump
@@ -72,29 +107,100 @@ local function StartCommand(bot, ucmd)
     end
 
     -- Crouch
-    if not bot:IsOnGround() or state.crouchTime > curTime then
+    if not state.isOnGround or state.crouchTime > curTime then
         buttons = buttons + IN_DUCK
     end
 
     -- Change to weapon_mor_brood if the bot is a brood alien
-    if state.whatRole == 2 then
+    if state.whatRole == 2 and isTargetValid then
         local broodWep = bot:GetWeapon("weapon_mor_brood")
-        if IsValid(broodWep) and curWeapon ~= broodWep then
+        if IsValid(broodWep) and state.curWeapon ~= broodWep and state.botPos:DistToSqr(state.curTarget:GetPos()) <= 90000 and bot.CanTransform then
             ucmd:SelectWeapon(broodWep)
         end
     end
 
-    -- Attack
-    if curWeaponValid then
-        if targetVisible and state.attack1Delay < curTime then
+    if state.whatRole ~= 3 then
+        local bestWep = nil
+        local bestPrio = 0
+        local curWeapons = bot:GetWeapons()
+
+        for i = 1, #curWeapons do
+            local wep = curWeapons[i]
+            if not IsValid(wep) then continue end
+            
+            local class = wep:GetClass()
+            local prio = 0
+            
+            -- Rifle > SMG/Light > Pistol > Melee
+            if MBot.Database.WEAPON_RIFLE[class] then
+                prio = 4
+            elseif MBot.Database.WEAPON_LIGHT[class] then
+                prio = 3
+            elseif MBot.Database.WEAPON_PISTOL[class] then
+                prio = 2
+            elseif MBot.Database.WEAPON_MELEE[class] then
+                prio = 1
+            end
+
+            if prio > bestPrio then
+                bestPrio = prio
+                bestWep = wep
+            end
+        end
+
+        if IsValid(bestWep) and state.curWeapon ~= bestWep and (state.whatRole ~= 2 or not isTargetValid or state.curWeaponClass ~= "weapon_mor_brood") then
+            ucmd:SelectWeapon(bestWep)
+        end
+
+        -- Drop any other weapon except melee and misc weapons
+        for i = 1, #curWeapons do
+            local wep = curWeapons[i]
+            if not IsValid(wep) or wep == bestWep then continue end
+
+            local class = wep:GetClass()
+            if not MBot.Database.WEAPON_MELEE[class] and not MBot.Database.WEAPON_MISC[class] then
+                WEPS.DropNotifiedWeapon(bot, wep)
+            end
+        end
+    end
+
+    if IsValid(state.curWeapon) then
+        -- Reload
+        if state.curWeapon:Clip1() == 0 or (not isTargetValid and state.curWeapon:Clip1() < state.curWeapon:GetMaxClip1()) then
+            buttons = buttons + IN_RELOAD
+        end
+
+        -- Attack
+        local targetVisible = isTargetValid and state.targetVisiblePos
+        local canAttack = targetVisible
+
+        if state.isMelee or state.whatRole == 2 then
+            canAttack = targetVisible and state.botPos:DistToSqr(state.curTarget:GetPos()) <= 10000
+        end
+
+        if canAttack and state.attack1Delay < curTime then
             buttons = buttons + IN_ATTACK
             state.attack1Delay = curTime + 0.05
+        elseif not canAttack then
+            buttons = buttons + IN_SPEED
         end
     end
 
     -- Forward when on ladder
     if state.onLadder then
         buttons = buttons + IN_FORWARD
+    end
+
+    -- Pickup weapons
+    if state.whatRole ~= 3 and state.isMelee then
+        for i = 1, #weaponCache do
+            local wep = weaponCache[i]
+            local wepPos = weaponCachePosLookup[wep]
+            if IsValid(wep) and wepPos and state.botPos:DistToSqr(wepPos) <= 2500 then
+                buttons = buttons + IN_USE
+                break
+            end
+        end
     end
 
     ucmd:ClearMovement()
@@ -121,11 +227,12 @@ local function SetupMove(bot, mv)
     local sideSpeed = 0
     local lookAngle = angle_zero
     local moveAngle = angle_zero
-    local botPos = bot:GetPos()
+    local botPos = state.botPos
     local reachedDest = false
     local curSegmentPos = nil
     local isOnLadder = state.onLadder
     local pathHasLadder = false
+    local currentlyLookingForWeapons = false
 
     -- Move through path segments
     if segments[state.pathSegment] and segments[state.pathSegment].pos:DistToSqr(botPos) < 900 then
@@ -168,7 +275,7 @@ local function SetupMove(bot, mv)
         end
 
         if state.stuckTime > 0 then
-            if not bot:Crouching() then
+            if not state.isCrouching then
                 state.jumpTime = curTime + 0.1
             end
 
@@ -212,6 +319,10 @@ local function SetupMove(bot, mv)
     if isTargetValid then
         if targetVisible then
             lookAngle = (targetVisible - bot:GetShootPos()):Angle()
+
+            if not state.isMelee and state.whatRole ~= 2 then
+                forwardSpeed = 0
+            end
         end
 
         if state.targetVisibleTime > curTime then
@@ -224,11 +335,22 @@ local function SetupMove(bot, mv)
         end
     end
 
-    -- Set goalPos to a random position every 10 seconds
-    if state.randomSpotTime < curTime and not isTargetValid then
+    -- Look for weapons if we are melee and don't have a target
+    if state.whatRole ~= 3 and #weaponCache > 0 and state.isMelee then
+        currentlyLookingForWeapons = true
+        
+        if state.lookForWeaponsTime < curTime then
+            local weaponPos = weaponCachePosLookup[weaponCache[math.random(#weaponCache)]]
+            state.goalPos = weaponPos
+            state.lookForWeaponsTime = curTime + 10
+        end
+    end
+
+    -- Set goalPos to a weapon or random position every 10 seconds
+    if state.randomSpotTime < curTime and not isTargetValid and not currentlyLookingForWeapons then
         state.goalPos = MBot.FindRandomSpot(bot)
         state.randomSpotTime = curTime + 10
-    elseif isTargetValid then
+    elseif isTargetValid or currentlyLookingForWeapons then
         state.randomSpotTime = 0
     end
 
@@ -245,6 +367,8 @@ local function SetupMove(bot, mv)
             lookAngle.p = 45
         end
 
+        forwardSpeed = maxSpeed
+        sideSpeed = 0
         moveAngle = lookAngle
     elseif state.onLadder then
         bot:ExitLadder()
@@ -288,6 +412,19 @@ local function UpdateGeneral()
 
             if not bot:Alive() and bot.NextSpawnTime and bot.NextSpawnTime < CurTime() then
                 bot:Spawn()
+                continue
+            end
+
+            local state = bot.BotStates
+            if not state then continue end
+
+            -- Infinite ammo
+            state.curWeapon = bot:GetActiveWeapon()
+            if IsValid(state.curWeapon) then
+                local ammoType = state.curWeapon:GetPrimaryAmmoType()
+                if ammoType then
+                    bot:SetAmmo(state.curWeapon:GetMaxClip1(), ammoType)
+                end
             end
 
             coroutine.yield()
@@ -391,6 +528,34 @@ local function UpdateTargets()
     end
 end
 
+local function UpdateWeaponCache()
+    while true do
+        local newCache = {}
+        local newPosLookup = {}
+
+        for _, categoryTable in pairs(MBot.Database) do
+            if type(categoryTable) ~= "table" then continue end
+
+            for classname, _ in pairs(categoryTable) do
+                local foundEnts = ents.FindByClass(classname)
+                for i = 1, #foundEnts do
+                    local ent = foundEnts[i]
+                    if IsValid(ent) and not IsValid(ent:GetOwner()) then
+                        newCache[#newCache + 1] = ent
+                        newPosLookup[ent] = ent:GetPos()
+                    end
+                end
+                ShouldYield()
+            end
+        end
+
+        weaponCache = newCache
+        weaponCachePosLookup = newPosLookup
+
+        coroutine.yield()
+    end
+end
+
 
 --[[----------------------------------------
     Hooks
@@ -399,6 +564,7 @@ end
 local generalCoroutine = coroutine.create(UpdateGeneral)
 local pathCoroutine = coroutine.create(UpdatePath)
 local targetCoroutine = coroutine.create(UpdateTargets)
+local weaponCacheCoroutine = coroutine.create(UpdateWeaponCache)
 
 hook.Add("PlayerSpawn", "MBot_PlayerSpawn", function(bot, trans)
     if not IsValid(bot) or not bot:IsBot() then return end
@@ -431,5 +597,9 @@ hook.Add("Think", "MBot_Think", function()
 
     if coroutine.status(targetCoroutine) == "suspended" then
         coroutine.resume(targetCoroutine)
+    end
+
+    if coroutine.status(weaponCacheCoroutine) == "suspended" then
+        coroutine.resume(weaponCacheCoroutine)
     end
 end)

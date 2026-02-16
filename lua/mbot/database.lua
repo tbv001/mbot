@@ -1,3 +1,16 @@
+MBot.Database = {}
+
+--[[----------------------------------------
+    Melee Weapons
+----------------------------------------]]--
+
+MBot.Database.WEAPON_MELEE = {
+    ["weapon_mor_crowbar"] = true,
+    ["weapon_mor_brood"] = true,
+    ["weapon_mor_swarm"] = true    
+}
+
+
 --[[----------------------------------------
     Pistol Weapons
 ----------------------------------------]]--

@@ -36,10 +36,23 @@ MBot.DefaultBotStates = {
     -- Game mode
     whatRole = 1, -- ROLE_HUMAN (1), ROLE_BROOD (2), ROLE_SWARM (3)
 
+    -- Weapon info
+    curWeapon = nil,
+    curWeaponClass = "",
+    isMelee = false,
+
+    -- Movement info
+    isCrouching = false,
+    isOnGround = false,
+
+    -- Other bot info
+    botPos = nil,
+
     -- Set by coroutines
     pendingTarget = nil,
     pendingProp = nil,
 
     -- Other timing stuff
-    randomSpotTime = 0
+    randomSpotTime = 0,
+    lookForWeaponsTime = 0
 }
