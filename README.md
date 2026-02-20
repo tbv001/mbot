@@ -1,4 +1,4 @@
-# MorBots - Bots for Morbus
+# Morbus Bots
 
 Bots for the Morbus game mode in Garry's Mod. Currently work-in-progress.
 
