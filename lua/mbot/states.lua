@@ -77,5 +77,6 @@ MBot.DefaultBotStates = {
 
     -- Other timing stuff
     randomSpotTime = 0,
+    doorCheckTime = 0,
     lookForWeaponsTime = 0
 }

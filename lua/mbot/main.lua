@@ -178,7 +178,6 @@ local function StartCommand(bot, ucmd)
                     local chosenIdx = availableUpgrades[math.random(1, #availableUpgrades)]
                     bot.Upgrades[chosenIdx] = (bot.Upgrades[chosenIdx] or 0) + 1
                     bot.Evo_Points = bot.Evo_Points - 1
-                    --MsgN(bot:Name() .. " upgraded " .. UPGRADES[chosenIdx].Title .. " to level " .. (bot.Upgrades[chosenIdx] or 0))
                     pointSpentThisLoop = true
                     break
                 end
@@ -316,8 +315,6 @@ local function SetupMove(bot, mv)
     if not IsValid(bot.Pathfinding) then
         return
     end
-
-    --bot.Pathfinding:Draw()
 
     local segments = bot.Pathfinding:GetAllSegments()
     if not segments then
@@ -542,6 +539,24 @@ local function SetupMove(bot, mv)
         state.forceAttack1Time = curTime + 1
     end
 
+    -- Handle doors
+    if state.doorCheckTime < curTime then
+        local doorTrace = util.QuickTrace(bot:EyePos(), bot:GetForward() * 50, bot)
+        local doorEnt = IsValid(doorTrace.Entity) and doorTrace.Entity or nil
+
+        if doorEnt then
+            local doorEntClass = doorEnt:GetClass()
+
+            if doorEntClass == "prop_door_rotating" then
+                doorEnt:Fire("OpenAwayFrom", bot, 0)
+            elseif doorEntClass == "func_door" then
+                doorEnt:Fire("Open")
+            end
+        end
+
+        state.doorCheckTime = curTime + 1
+    end
+
     -- Handle ladders
     if state.onLadder and pathHasLadder then
         local targetPos = segments[state.pathSegment].pos
@@ -566,10 +581,7 @@ local function SetupMove(bot, mv)
         end
     end
 
-    local AimLerp = 0.12 --0.015 * 8
-    -- if state.whatRole ~= 1 and state.isMelee then
-    --     AimLerp = AimLerp * 2
-    -- end
+    local AimLerp = 0.12 -- 0.015 * 8
 
     -- Finally, set the bot's move angle, view angle, and movement speeds
     mv:SetForwardSpeed(forwardSpeed)
