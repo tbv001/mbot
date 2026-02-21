@@ -146,6 +146,7 @@ function MBot.IsTargetVisible(bot, target)
 
         propTrace.start = bot:EyePos()
         propTrace.endpos = propCenter
+        propTrace.filter = bot
 
         local trace = util.TraceLine(propTrace)
         if trace.Hit and trace.Entity == target then

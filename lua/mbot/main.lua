@@ -524,7 +524,7 @@ local function SetupMove(bot, mv)
 
     -- Attack prop target
     if not targetVisible and IsValid(state.propTarget) then
-        lookAngle = (state.propTarget:GetPos() - bot:GetShootPos()):Angle()
+        lookAngle = (state.propTarget:WorldSpaceCenter() - bot:GetShootPos()):Angle()
 
         if state.isMelee then
             moveAngle = lookAngle
@@ -928,7 +928,7 @@ local function UpdateBreakables()
                 if ent:Health() <= 0 or ent:Health() > 1000 then continue end
 
                 local dist = botPos:DistToSqr(ent:GetPos())
-                if dist < closestDist then
+                if dist < closestDist and MBot.IsTargetVisible(bot, ent) then
                     closestDist = dist
                     closestEnt = ent
                 end
