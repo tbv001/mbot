@@ -6,6 +6,7 @@ local weaponCache = {}
 local weaponCachePosLookup = {}
 local friendliesCounts = {}
 local alienEnemyCache = {}
+local supportQueue = {}
 
 -- Missions
 local sleepPos = {}
@@ -92,9 +93,9 @@ local function StartCommand(bot, ucmd)
         isTargetValid = true
     else
         state.curTarget = nil
-        state.forgetTargetTime = 0
         state.targetVisibleTime = 0
         state.targetVisiblePos = nil
+        state.exposeMyself = false
     end
 
     -- Update weapon info
@@ -220,9 +221,10 @@ local function StartCommand(bot, ucmd)
     -- Change to weapon_mor_brood if the bot is a brood alien
     if state.whatRole == 2 and isTargetValid then
         local broodWep = bot:GetWeapon("weapon_mor_brood")
-        if IsValid(broodWep) and state.curWeapon ~= broodWep and (state.broodExposed or (state.botPos:DistToSqr(state.curTarget:GetPos()) <= 14400 and bot.CanTransform)) then
+        if IsValid(broodWep) and state.curWeapon ~= broodWep and bot.CanTransform and (state.exposeMyself or state.botPos:DistToSqr(state.curTarget:GetPos()) <= 14400) then
             ucmd:SelectWeapon(broodWep)
             state.broodExposed = true
+            state.exposeMyself = false
         end
     end
 
@@ -237,6 +239,7 @@ local function StartCommand(bot, ucmd)
         if IsValid(bestWep) and state.curWeapon ~= bestWep and (state.whatRole ~= 2 or not isTargetValid and state.changeWepDelay < curTime) then
             ucmd:SelectWeapon(bestWep)
             state.broodExposed = false
+            state.exposeMyself = false
         end
     end
 
@@ -282,37 +285,60 @@ local function StartCommand(bot, ucmd)
     ucmd:SetButtons(buttons)
 end
 
-local function PlayerHurt(bot, attacker)
-    if not bot.BotStates then return end
-    if not IsValid(attacker) or not attacker:Alive() then return end
-
+local function PlayerHurt(ply, attacker)
     local curTime = CurTime()
-    local state = bot.BotStates
+    local state = ply.BotStates
     local attackerRole = attacker.GetRole and attacker:GetRole() or 1
 
-    if state.whatRole == 2 and attackerRole == 1 then
-        state.broodExposed = true
-        state.curTarget = attacker
-        state.forgetTargetTime = curTime + 10
-        state.lookAtPos = attacker:EyePos()
-        state.lookAtTime = curTime + 2
-    elseif not IsValid(state.curTarget) and state.whatRole == 3 and attackerRole == 1 then
-        state.curTarget = attacker
-        state.forgetTargetTime = curTime + 10
-        state.lookAtPos = attacker:EyePos()
-        state.lookAtTime = curTime + 2
-    elseif not IsValid(state.curTarget) and state.whatRole == 1 then
-        if attackerRole == 3 then
+    if state and ply:Alive() and attacker:Alive() then
+        if state.whatRole == 2 and attackerRole == 1 then
+            state.exposeMyself = true
             state.curTarget = attacker
             state.forgetTargetTime = curTime + 10
+            state.lookAtPos = attacker:EyePos()
+            state.lookAtTime = curTime + 2
+        elseif not IsValid(state.curTarget) and state.whatRole == 3 and attackerRole == 1 then
+            state.curTarget = attacker
+            state.forgetTargetTime = curTime + 10
+            state.lookAtPos = attacker:EyePos()
+            state.lookAtTime = curTime + 2
+        elseif not IsValid(state.curTarget) and state.whatRole == 1 then
+            if attackerRole == 3 then
+                state.curTarget = attacker
+                state.forgetTargetTime = curTime + 10
+            end
+            state.lookAtPos = attacker:EyePos()
+            state.lookAtTime = curTime + 2
+        elseif IsValid(state.curTarget) and state.curTarget == attacker then
+            state.forgetTargetTime = curTime + 10
+            state.lookAtPos = attacker:EyePos()
+            state.lookAtTime = curTime + 2
         end
+    end
 
-        state.lookAtPos = attacker:EyePos()
-        state.lookAtTime = curTime + 2
-    elseif IsValid(state.curTarget) and state.curTarget == attacker then
-        state.forgetTargetTime = curTime + 10
-        state.lookAtPos = attacker:EyePos()
-        state.lookAtTime = curTime + 2
+    local plyInQueue = false
+    local attInQueue = false
+    for i = 1, #supportQueue do
+        if supportQueue[i].ply == ply then
+            plyInQueue = true
+        end
+        if supportQueue[i].ply == attacker then
+            attInQueue = true
+        end
+    end
+
+    if not plyInQueue then
+        supportQueue[#supportQueue + 1] = {
+            ply = ply,
+            att = attacker
+        }
+    end
+
+    if not attInQueue then
+        supportQueue[#supportQueue + 1] = {
+            ply = attacker,
+            att = ply
+        }
     end
 end
 
@@ -470,7 +496,7 @@ local function SetupMove(bot, mv)
     end
 
     -- Set goalPos to a random position every 10 seconds
-    if (state.randomSpotTime < curTime or reachedDest) and not isTargetValid and not currentlyLookingForWeapons and not pathToMission then
+    if (state.randomSpotTime < curTime and state.lastSetGoalPosTime < curTime or reachedDest) and not isTargetValid and not currentlyLookingForWeapons and not pathToMission then
         state.goalPos = MBot.FindRandomSpot(bot)
         state.randomSpotTime = curTime + 10
     elseif isTargetValid or currentlyLookingForWeapons or pathToMission then
@@ -1007,6 +1033,73 @@ local function UpdateSuspects()
     end
 end
 
+local function ProcessSupportQueue()
+    while true do
+        local curSupportQueue = supportQueue
+        local supportCount = #curSupportQueue
+
+        if supportCount == 0 then
+            coroutine.yield()
+            continue
+        end
+
+        for i = 1, supportCount do
+            local entry = curSupportQueue[i]
+            if IsValid(entry.ply) and IsValid(entry.att) then
+                local ply = entry.ply
+                local plyRole = ply.GetRole and ply:GetRole() or 1
+                local plyActiveWep = ply:GetActiveWeapon()
+                local plyBroodDisguise = plyRole == 2 and IsValid(plyActiveWep) and plyActiveWep:GetClass() ~= "weapon_mor_brood"
+
+                local att = entry.att
+                local attRole = att.GetRole and att:GetRole() or 1
+                -- local attActiveWep = att:GetActiveWeapon()
+                -- local attBroodDisguise = attRole == 2 and IsValid(attActiveWep) and attActiveWep:GetClass() ~= "weapon_mor_brood"
+
+                for _, bot in player.Iterator() do
+                    if not IsValid(bot) then continue end
+                    if bot == ply then continue end
+                    if bot == att then continue end
+                    if not bot:IsBot() then continue end
+                    if not bot:Alive() then continue end
+
+                    local state = bot.BotStates
+                    if not state then continue end
+
+                    local plyEyePos = ply:EyePos()
+                    local plyPos = ply:GetPos()
+                    local attEyePos = att:EyePos()
+                    local isVisible = bot:VisibleVec(plyEyePos)
+
+                    if state.whatRole == 1 and (plyRole == 1 or plyBroodDisguise) then
+                        if isVisible then
+                            state.lookAtPos = attEyePos
+                            state.lookAtTime = CurTime() + 2
+                        elseif bot:GetPos():DistToSqr(plyPos) <= 250000 then
+                            state.goalPos = plyPos
+                            state.lastSetGoalPosTime = CurTime() + 5
+                        end
+                    elseif state.whatRole == 2 and plyRole == 2 and isVisible and bot:GetPos():DistToSqr(plyPos) <= 250000 and bot.CanTransform then
+                        state.curTarget = att
+                        state.forgetTargetTime = CurTime() + 10
+                        state.lookAtPos = attEyePos
+                        state.lookAtTime = CurTime() + 2
+                        state.exposeMyself = true
+                    end
+
+                    ShouldYield()
+                end
+            end
+
+            ShouldYield()
+        end
+
+        supportQueue = {}
+
+        coroutine.yield()
+    end
+end
+
 
 --[[----------------------------------------
     Hooks
@@ -1021,6 +1114,7 @@ local friendliesCoroutine = coroutine.create(UpdateFriendlies)
 local breakablesCoroutine = coroutine.create(UpdateBreakables)
 local alienXrayCoroutine = coroutine.create(UpdateAlienXray)
 local suspectCoroutine = coroutine.create(UpdateSuspects)
+local supportCoroutine = coroutine.create(ProcessSupportQueue)
 
 hook.Add("PlayerSpawn", "MBot_PlayerSpawn", function(bot, trans)
     if not IsValid(bot) or not bot:IsBot() then return end
@@ -1042,11 +1136,11 @@ hook.Add("SetupMove", "MBot_SetupMove", function(bot, mv, cmd)
     SetupMove(bot, mv)
 end)
 
-hook.Add("PlayerHurt", "MBot_PlayerHurt", function(bot, attacker, healthRemaining, damageTaken)
-    if not IsValid(bot) or not bot:IsBot() then return end
-    if not bot:Alive() then return end
+hook.Add("PlayerHurt", "MBot_PlayerHurt", function(ply, attacker, healthRemaining, damageTaken)
+    if not IsValid(ply) then return end
+    if not IsValid(attacker) then return end
 
-    PlayerHurt(bot, attacker)
+    PlayerHurt(ply, attacker)
 end)
 
 hook.Add("Think", "MBot_Think", function()
@@ -1084,5 +1178,9 @@ hook.Add("Think", "MBot_Think", function()
 
     if coroutine.status(suspectCoroutine) == "suspended" then
         coroutine.resume(suspectCoroutine)
+    end
+
+    if coroutine.status(supportCoroutine) == "suspended" then
+        coroutine.resume(supportCoroutine)
     end
 end)

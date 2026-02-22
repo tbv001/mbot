@@ -5,6 +5,7 @@
 MBot.DefaultBotStates = {
     -- Pathfinding
     goalPos = nil,
+    lastSetGoalPosTime = 0,
     pathSegment = 2,
 
     -- Stuck management
@@ -32,6 +33,7 @@ MBot.DefaultBotStates = {
     attack2CD = 0,
     forceAttack1Time = 0,
     broodExposed = false,
+    exposeMyself = false,
     changeWepDelay = 0, -- For Brood bots
 
     -- Movement
