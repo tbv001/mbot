@@ -75,7 +75,7 @@ local function StartCommand(bot, ucmd)
     local targetRole = IsValid(state.curTarget) and (state.curTarget.GetRole and state.curTarget:GetRole() or 1) or 1
     local isLonely = (friendliesCounts[state.curTarget] or 0) == 0
     local isObserved = IsValid(state.curTarget) and MBot.IsBotObserved(bot, state.curTarget) or false
-    if IsValid(state.curTarget) and state.curTarget:Alive() and (state.whatRole == 1 or targetRole == 1) and state.forgetTargetTime > curTime and (state.whatRole ~= 2 or state.broodExposed or (isLonely and not isObserved)) then
+    if IsValid(state.curTarget) and state.curTarget:Alive() and state.forgetTargetTime > curTime and (state.whatRole == 1 or targetRole == 1) and (state.whatRole ~= 2 or state.broodExposed or (isLonely and not isObserved)) then
         local visiblePos = MBot.IsTargetVisible(bot, state.curTarget)
         if visiblePos then
             state.targetVisibleTime = curTime + 2
@@ -84,6 +84,11 @@ local function StartCommand(bot, ucmd)
         else
             state.targetVisiblePos = nil
         end
+
+        if targetRole == 2 and not state.confirmedEnemies[state.curTarget] then
+            state.confirmedEnemies[state.curTarget] = true
+        end
+
         isTargetValid = true
     else
         state.curTarget = nil
@@ -428,11 +433,11 @@ local function SetupMove(bot, mv)
             state.stuckBackTime = 0
         end
 
-        if state.stuckStrafeDir ~= 0 and not targetVisible and not isPropTargetValid then
+        if state.stuckStrafeDir ~= 0 and not isPropTargetValid then
             sideSpeed = state.stuckStrafeDir * maxSpeed
         end
 
-        if state.stuckBackTime > curTime and not targetVisible and not isPropTargetValid then
+        if state.stuckBackTime > curTime and not isPropTargetValid then
             forwardSpeed = -maxSpeed
         end
     end
@@ -704,6 +709,10 @@ local function UpdateTargets()
                         elseif plyRole == 3 then
                             isHostile = true
                         end
+
+                        if not isHostile and state.confirmedEnemies[ply] then
+                            isHostile = true
+                        end
                     elseif botRole == 2 then
                         if plyRole == 1 then
                             isHostile = true
@@ -945,6 +954,58 @@ local function UpdateBreakables()
     end
 end
 
+local corpseTrace = {mask = MASK_SHOT}
+
+local function UpdateSuspects()
+    while true do
+        for _, bot in player.Iterator() do
+            if not IsValid(bot) then continue end
+            if not bot:IsBot() then continue end
+            if not bot:Alive() then continue end
+
+            local state = bot.BotStates
+            if not state then continue end
+
+            if state.whatRole ~= 1 then
+                state.confirmedEnemies = {}
+                continue
+            end
+
+            local botPos = bot:GetPos()
+            local plyCorpses = ents.FindInSphere(botPos, 500)
+
+            for i = 1, #plyCorpses do
+                local corpse = plyCorpses[i]
+                if not IsValid(corpse) then continue end
+                if corpse:GetClass() ~= "prop_ragdoll" then continue end
+                if not corpse:GetNWBool("HumanBody") then continue end
+
+                local corpseOwner = corpse:GetNWEntity("Player")
+                if not IsValid(corpseOwner) then continue end
+
+                local corpsePos = corpse:WorldSpaceCenter()
+
+                corpseTrace.start = bot:EyePos()
+                corpseTrace.endpos = corpsePos
+                corpseTrace.ignore = bot
+
+                local trace = util.TraceLine(corpseTrace)
+                local corpseVisible = trace.Hit and trace.Entity == corpse or false
+
+                --// TODO: If the bot sees a corpse that's far away, bot should check it out
+                if corpsePos:DistToSqr(botPos) <= 250000 and corpseVisible and MBot.IsPosWithinFOV(bot, corpsePos) and not state.confirmedEnemies[corpseOwner] then
+                    state.confirmedEnemies[corpseOwner] = true
+                end
+
+                ShouldYield()
+            end
+
+            ShouldYield()
+        end
+
+        coroutine.yield()
+    end
+end
 
 
 --[[----------------------------------------
@@ -959,6 +1020,7 @@ local closestWeaponCoroutine = coroutine.create(UpdateClosestWep)
 local friendliesCoroutine = coroutine.create(UpdateFriendlies)
 local breakablesCoroutine = coroutine.create(UpdateBreakables)
 local alienXrayCoroutine = coroutine.create(UpdateAlienXray)
+local suspectCoroutine = coroutine.create(UpdateSuspects)
 
 hook.Add("PlayerSpawn", "MBot_PlayerSpawn", function(bot, trans)
     if not IsValid(bot) or not bot:IsBot() then return end
@@ -1018,5 +1080,9 @@ hook.Add("Think", "MBot_Think", function()
 
     if coroutine.status(alienXrayCoroutine) == "suspended" then
         coroutine.resume(alienXrayCoroutine)
+    end
+
+    if coroutine.status(suspectCoroutine) == "suspended" then
+        coroutine.resume(suspectCoroutine)
     end
 end)

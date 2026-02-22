@@ -21,6 +21,7 @@ MBot.DefaultBotStates = {
     forgetTargetTime = 0,
     targetVisibleTime = 0,
     targetVisiblePos = nil,
+    confirmedEnemies = {},
 
     -- Look at
     lookAtPos = nil,
