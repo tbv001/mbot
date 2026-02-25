@@ -999,6 +999,7 @@ local function UpdateSuspects()
 
             local botPos = bot:GetPos()
             local plyCorpses = ents.FindInSphere(botPos, 500)
+            local curTime = CurTime()
 
             for i = 1, #plyCorpses do
                 local corpse = plyCorpses[i]
@@ -1018,9 +1019,16 @@ local function UpdateSuspects()
                 local trace = util.TraceLine(corpseTrace)
                 local corpseVisible = trace.Hit and trace.Entity == corpse or false
 
-                --// TODO: If the bot sees a corpse that's far away, bot should check it out
-                if corpsePos:DistToSqr(botPos) <= 250000 and corpseVisible and MBot.IsPosWithinFOV(bot, corpsePos) and not state.confirmedEnemies[corpseOwner] then
-                    state.confirmedEnemies[corpseOwner] = true
+                if corpseVisible and MBot.IsPosWithinFOV(bot, corpsePos) and not state.confirmedEnemies[corpseOwner] then
+                    local distSqr = corpsePos:DistToSqr(botPos)
+                    if distSqr <= 48400 then
+                        state.confirmedEnemies[corpseOwner] = true
+                    elseif distSqr <= 562500 and not IsValid(state.curTarget) and state.lastSetGoalPosTime < curTime then
+                        state.goalPos = corpsePos
+                        state.lastSetGoalPosTime = curTime + 1
+                        state.lookAtPos = corpsePos
+                        state.lookAtTime = curTime + 1
+                    end
                 end
 
                 ShouldYield()
