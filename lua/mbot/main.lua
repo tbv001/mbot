@@ -268,6 +268,11 @@ local function StartCommand(bot, ucmd)
         end
     end
 
+    -- Toggle flashlight
+    if not bot:FlashlightIsOn() and bot.Battery and bot.Battery > 17 then
+        ucmd:SetImpulse(100)
+    end
+
     -- Forward when on ladder
     if state.onLadder then
         buttons = buttons + IN_FORWARD
