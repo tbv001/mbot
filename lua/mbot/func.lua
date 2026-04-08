@@ -347,15 +347,27 @@ function MBot.UpdateInventory(bot)
         local class = wep:GetClass()
         local prio = 0
         
-        -- Rifle > SMG/Light > Pistol > Melee
-        if MBot.Database.WEAPON_RIFLE[class] then
-            prio = 4
-        elseif MBot.Database.WEAPON_LIGHT[class] then
-            prio = 3
-        elseif MBot.Database.WEAPON_PISTOL[class] then
-            prio = 2
-        elseif MBot.Database.WEAPON_MELEE[class] then
-            prio = 1
+        -- Brood Bots: SMG/Light > Pistol > Rifle > Melee
+        if state.whatRole == 2 then
+            if MBot.Database.WEAPON_LIGHT[class] then
+                prio = 4
+            elseif MBot.Database.WEAPON_PISTOL[class] then
+                prio = 3
+            elseif MBot.Database.WEAPON_RIFLE[class] then
+                prio = 2
+            elseif MBot.Database.WEAPON_MELEE[class] then
+                prio = 1
+            end
+        else -- Human Bots: Rifle > SMG/Light > Pistol > Melee
+            if MBot.Database.WEAPON_RIFLE[class] then
+                prio = 4
+            elseif MBot.Database.WEAPON_LIGHT[class] then
+                prio = 3
+            elseif MBot.Database.WEAPON_PISTOL[class] then
+                prio = 2
+            elseif MBot.Database.WEAPON_MELEE[class] then
+                prio = 1
+            end
         end
 
         state.inventory[class] = wep
